@@ -69,6 +69,7 @@ jobs:
       - name: Smoke test
         run: |
           URL="${{ vars.PUBLIC_URL || 'https://agent-production-302f.up.railway.app' }}"
+          URL="$(echo "$URL" | tr -d '[:space:]')"
           sleep 30
           for i in $(seq 1 12); do
             curl -fsS "$URL/health" && exit 0
