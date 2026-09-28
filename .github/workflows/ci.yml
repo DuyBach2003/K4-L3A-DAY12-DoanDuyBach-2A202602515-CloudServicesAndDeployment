@@ -61,7 +61,7 @@ jobs:
         with:
           node-version: "20"
       - name: Install Railway CLI
-        run: npm install -g @railway/cli@3
+        run: npm install -g @railway/cli@5
       - name: Deploy
         run: railway up --ci --service "${{ vars.RAILWAY_SERVICE || 'agent' }}"
         env:
