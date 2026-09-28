@@ -1,0 +1,77 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run pytest (bỏ test cần bản deploy sống và test tự tham chiếu badge)
+        run: pytest tests/ -v --ignore=tests/test_cp5.py --ignore=tests/test_bonus_cicd.py -m "not docker"
+        env:
+          AGENT_API_KEY: ci-dummy
+          REDIS_URL: "fake://"
+
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t agent:${{ github.sha }} .
+      - name: Smoke run container
+        run: |
+          docker run -d --name agent -p 8000:8000 \
+            -e AGENT_API_KEY=ci-dummy -e REDIS_URL=fake:// agent:${{ github.sha }}
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          docker logs agent
+          exit 1
+
+  deploy:
+    name: Deploy to Railway
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@3
+      - name: Deploy
+        run: railway up --ci --service "${{ vars.RAILWAY_SERVICE || 'agent' }}"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Smoke test
+        run: |
+          URL="${{ vars.PUBLIC_URL || 'https://agent-production-302f.up.railway.app' }}"
+          sleep 30
+          for i in $(seq 1 12); do
+            curl -fsS "$URL/health" && exit 0
+            sleep 10
+          done
+          exit 1
